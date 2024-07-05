@@ -73,6 +73,9 @@ impl TryFrom<Vec<String>> for Args {
 
         let mut args = Args::new();
 
+        //skips the first argument that is usually the binary
+        arg_iter.next();
+
         while let Some(s) = arg_iter.next() {
             if s.starts_with("--") {
                 if let Some(flag) = s.parse().ok() {
@@ -105,8 +108,6 @@ fn main() -> Result<(), Error> {
         Ok(x) => x,
         Err(x) => panic!("{}", x),
     };
-
-    dbg!(&args);
 
     let input_file = fs::File::open(&args.input_file).unwrap();
     let output_file = fs::File::create(args.get_output_file().with_extension("csv")).unwrap();

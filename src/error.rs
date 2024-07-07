@@ -7,6 +7,7 @@ pub enum Error {
     IOError(io::Error),
     SerdeJsonError(serde_json::Error),
     CSVError(csv::Error),
+    SQLXError(sqlx::Error),
     NBTMissingField(&'static str),
     IncorrecFlags,
     LOLError,
@@ -74,5 +75,11 @@ impl From<serde_json::Error> for Error {
 impl From<csv::Error> for Error {
     fn from(value: csv::Error) -> Self {
         Self::CSVError(value)
+    }
+}
+
+impl From<sqlx::Error> for Error {
+    fn from(value: sqlx::Error) -> Self {
+        Self::SQLXError(value)
     }
 }

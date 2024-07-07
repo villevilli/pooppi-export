@@ -3,8 +3,9 @@ DROP TABLE IF EXISTS objectives;
 DROP TABLE IF EXISTS players;
 CREATE TABLE objectives (
     id BIGINT NOT NULL AUTO_INCREMENT,
-    criteria_name VARCHAR(255) UNIQUE,
+    objective_name VARCHAR(255) UNIQUE,
     display_name VARCHAR(255),
+    criteria_name VARCHAR(255),
     PRIMARY KEY (id)
 );
 CREATE TABLE players (
@@ -18,5 +19,5 @@ CREATE TABLE stats (
     objective_name VARCHAR(255),
     time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (player_name) REFERENCES players (player_name),
-    FOREIGN KEY (objective_name) REFERENCES objectives (criteria_name)
+    FOREIGN KEY (objective_name) REFERENCES objectives (objective_name)
 );

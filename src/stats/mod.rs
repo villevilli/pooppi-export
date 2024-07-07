@@ -1,9 +1,12 @@
-use std::io::{self, Write};
+use std::{
+    io::{self, Write},
+    iter::once,
+};
 
 use crate::error::Error;
 use nbt::{from_gzip_reader, Blob, Map, Value};
 use serde::{Deserialize, Serialize};
-use sqlx::{mysql::MySqlQueryResult, MySqlConnection};
+use sqlx::{mysql::MySqlQueryResult, query, MySqlConnection};
 
 pub type PlayerScores = Map<String, Vec<PlayerScore>>;
 pub type Objectives = Map<String, Objective>;
@@ -21,10 +24,6 @@ pub struct Stats {
 impl Stats {
     pub fn from_gzip_reader(src: impl io::Read) -> Result<Self, Error> {
         Self::parse_blob(from_gzip_reader(src)?)
-    }
-
-    pub async fn write_to_sql(&self, conn: &mut MySqlConnection) {
-        todo!()
     }
 
     fn parse_blob(blob: Blob) -> Result<Self, Error> {
@@ -95,12 +94,42 @@ impl Stats {
         })
     }
 
-    pub fn write_csv(&self, w: impl Write) -> Result<(), Error> {
-        let mut titles: Vec<String> = self.objectives.iter().map(|x| x.0.clone()).collect();
-        titles.sort_unstable();
+    pub async fn write_to_sql(&self, conn: &mut MySqlConnection) -> Result<(), Error> {
+        let players = self.get_player_list();
 
-        let mut w = csv::Writer::from_writer(w);
+        for p in players.iter() {
+            query("INSERT IGNORE INTO players (player_name) VALUES (?)")
+                .bind(p)
+                .execute(&mut *conn)
+                .await?;
+        }
 
+        for (name, obj) in self.objectives.iter() {
+            query(
+                "INSERT IGNORE INTO objectives (objective_name, display_name, criteria_name) VALUES (?,?,?);",
+            )
+            .bind(name)
+            .bind(&obj.display_name)
+            .bind(&obj.criteria_name)
+            .execute(&mut *conn)
+            .await?;
+        }
+
+        for (obj_name, player_scores) in self.player_scores.iter() {
+            for player_score in player_scores {
+                query("INSERT INTO stats (score, player_name, objective_name) VALUES (?,?,?)")
+                    .bind(&player_score.score)
+                    .bind(&player_score.player_name)
+                    .bind(&obj_name)
+                    .execute(&mut *conn)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn get_player_list(&self) -> Vec<String> {
         let mut players: Vec<String> = self
             .player_scores
             .iter()
@@ -112,6 +141,15 @@ impl Stats {
         players.sort_unstable();
         players.dedup();
 
+        players
+    }
+
+    pub fn write_csv(&self, w: impl Write) -> Result<(), Error> {
+        let mut titles: Vec<String> = self.objectives.iter().map(|x| x.0.clone()).collect();
+        titles.sort_unstable();
+
+        let mut w = csv::Writer::from_writer(w);
+
         let mut top_row = vec!["Players".to_string()];
 
         {
@@ -120,13 +158,17 @@ impl Stats {
             }
         }
 
+        let players = self.get_player_list();
+
         w.write_record(top_row)?;
 
+        //loops over every player gathering all the stats
         for player in players {
             let mut row: Vec<String> = Vec::new();
 
             row.push(player.clone());
 
+            //gathers all the stats for a specific player
             for title in &titles {
                 row.push(
                     self.player_scores
@@ -155,6 +197,19 @@ pub struct Objective {
     display_auto_update: i8,
     display_name: String,
     render_type: String,
+}
+
+impl Objective {
+    async fn insert_to_db(
+        &self,
+        conn: &mut sqlx::MySqlConnection,
+    ) -> Result<MySqlQueryResult, sqlx::Error> {
+        let query =
+            sqlx::query("INSERT INTO objectives (criteria_name, display_name) VALUES (?,?)")
+                .bind(&self.criteria_name)
+                .bind(&self.display_name);
+        query.execute(conn).await
+    }
 }
 
 impl TryFrom<&Value> for Objective {

@@ -1,12 +1,12 @@
 use std::{
-    fs,
+    fs::{self, File},
     path::{Path, PathBuf},
     str::FromStr,
 };
 
 #[derive(Debug)]
 enum Flag {
-    JSON,
+    SQL,
     CSV,
 }
 
@@ -15,7 +15,7 @@ impl FromStr for Flag {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "--json" => Ok(Flag::JSON),
+            "--sql" => Ok(Flag::SQL),
             "--csv" => Ok(Flag::CSV),
             _ => Err(Error::IncorrecFlags),
         }
@@ -30,13 +30,15 @@ impl TryFrom<char> for Flag {
 
         match c {
             'c' => Ok(CSV),
-            'j' => Ok(JSON),
+            's' => Ok(SQL),
             _ => Err(Error::IncorrecFlags),
         }
     }
 }
 
+use futures::{executor::block_on, future::ok};
 use poop_scoreboard::{error::Error, stats::Stats};
+use sqlx::{mysql::MySqlPoolOptions, Connection, MySqlConnection, MySqlPool};
 
 #[derive(Debug)]
 struct Args {
@@ -107,15 +109,33 @@ fn main() -> Result<(), Error> {
     };
 
     let input_file = fs::File::open(&args.input_file).unwrap();
+
     let output_file = fs::File::create(args.get_output_file().with_extension("csv")).unwrap();
 
+    match args.flags[0] {
+        Flag::SQL => write_sql(input_file),
+        Flag::CSV => write_csv(input_file, output_file),
+    }?;
+
+    Ok(())
+}
+
+fn write_csv(input_file: File, output_file: File) -> Result<(), Error> {
     let stats = Stats::from_gzip_reader(input_file)?;
     stats.write_csv(output_file)?;
 
-    println!(
-        "Converted nbt to csv and saved it as {}",
-        args.get_output_file().to_str().unwrap()
-    );
+    println!("Converted nbt to csv");
+
+    Ok(())
+}
+
+fn write_sql(input_file: File) -> Result<(), Error> {
+    let mut conn = block_on(MySqlConnection::connect(
+        "mysql://poop_test:qwerty@localhost/poop_test",
+    ))?;
+
+    let stats = Stats::from_gzip_reader(input_file)?;
+    block_on(stats.write_to_sql(&mut conn)).unwrap();
 
     Ok(())
 }

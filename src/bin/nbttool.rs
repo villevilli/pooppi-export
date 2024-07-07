@@ -36,15 +36,16 @@ impl TryFrom<char> for Flag {
     }
 }
 
-use futures::{executor::block_on, future::ok};
+use futures::executor::block_on;
 use poop_scoreboard::{error::Error, stats::Stats};
-use sqlx::{mysql::MySqlPoolOptions, Connection, MySqlConnection, MySqlPool};
+use sqlx::{Connection, MySqlConnection};
 
 #[derive(Debug)]
 struct Args {
     flags: Vec<Flag>,
     input_file: PathBuf,
     output_file: Option<PathBuf>,
+    sql_url: Option<String>,
 }
 
 impl Args {
@@ -53,6 +54,7 @@ impl Args {
             flags: Vec::new(),
             input_file: PathBuf::new(),
             output_file: None,
+            sql_url: None,
         }
     }
 
@@ -90,7 +92,12 @@ impl TryFrom<Vec<String>> for Args {
                 match arg_iter.len() {
                     1 => {
                         args.input_file = std::path::PathBuf::from(&s);
-                        args.output_file = Some(std::path::PathBuf::from(&arg_iter.next().unwrap()))
+                        let second = &arg_iter.next().unwrap();
+
+                        match args.flags[0] {
+                            Flag::CSV => args.output_file = Some(std::path::PathBuf::from(second)),
+                            Flag::SQL => args.sql_url = Some(second.clone()),
+                        }
                     }
                     0 => args.input_file = std::path::PathBuf::from(&s),
                     _ => return Err(Error::IncorrecFlags),
@@ -110,11 +117,13 @@ fn main() -> Result<(), Error> {
 
     let input_file = fs::File::open(&args.input_file).unwrap();
 
-    let output_file = fs::File::create(args.get_output_file().with_extension("csv")).unwrap();
-
     match args.flags[0] {
-        Flag::SQL => write_sql(input_file),
-        Flag::CSV => write_csv(input_file, output_file),
+        Flag::SQL => write_sql(input_file, &args.sql_url.unwrap()),
+        Flag::CSV => {
+            let output_file =
+                fs::File::create(args.get_output_file().with_extension("csv")).unwrap();
+            write_csv(input_file, output_file)
+        }
     }?;
 
     Ok(())
@@ -129,10 +138,8 @@ fn write_csv(input_file: File, output_file: File) -> Result<(), Error> {
     Ok(())
 }
 
-fn write_sql(input_file: File) -> Result<(), Error> {
-    let mut conn = block_on(MySqlConnection::connect(
-        "mysql://poop_test:qwerty@localhost/poop_test",
-    ))?;
+fn write_sql(input_file: File, url: &str) -> Result<(), Error> {
+    let mut conn = block_on(MySqlConnection::connect(url))?;
 
     let stats = Stats::from_gzip_reader(input_file)?;
     block_on(stats.write_to_sql(&mut conn)).unwrap();

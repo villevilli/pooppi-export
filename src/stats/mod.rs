@@ -1,9 +1,11 @@
 use std::{
     io::{self, Write},
     iter::once,
+    sync,
 };
 
 use crate::error::Error;
+use chrono::{DateTime, TimeZone, Utc};
 use nbt::{from_gzip_reader, Blob, Map, Value};
 use serde::{Deserialize, Serialize};
 use sqlx::{mysql::MySqlQueryResult, query, MySqlConnection};
@@ -94,7 +96,11 @@ impl Stats {
         })
     }
 
-    pub async fn write_to_sql(&self, conn: &mut MySqlConnection) -> Result<(), Error> {
+    pub async fn write_to_sql(
+        &self,
+        conn: &mut MySqlConnection,
+        timestamp: DateTime<Utc>,
+    ) -> Result<(), Error> {
         let players = self.get_player_list();
 
         for p in players.iter() {
@@ -117,12 +123,15 @@ impl Stats {
 
         for (obj_name, player_scores) in self.player_scores.iter() {
             for player_score in player_scores {
-                query("INSERT INTO stats (score, player_name, objective_name) VALUES (?,?,?)")
-                    .bind(&player_score.score)
-                    .bind(&player_score.player_name)
-                    .bind(&obj_name)
-                    .execute(&mut *conn)
-                    .await?;
+                query(
+                    "INSERT INTO stats (score, player_name, objective_name, time) VALUES (?,?,?,?)",
+                )
+                .bind(&player_score.score)
+                .bind(&player_score.player_name)
+                .bind(&obj_name)
+                .bind(&timestamp)
+                .execute(&mut *conn)
+                .await?;
             }
         }
 

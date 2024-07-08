@@ -20,4 +20,4 @@ CREATE TABLE stats (
     time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (player_name) REFERENCES players (player_name),
     FOREIGN KEY (objective_name) REFERENCES objectives (objective_name)
-);
+) ENGINE InnoDB PAGE_COMPRESSED = 1 PAGE_COMPRESSION_LEVEL = 9;

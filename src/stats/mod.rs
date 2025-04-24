@@ -89,7 +89,12 @@ impl Stats {
                                 .unwrap()
                                 .push(player_score.try_into()?),
                             false => {
-                                player_scores.insert(key.clone(), vec![player_score.try_into()?]);
+                                player_scores.insert(
+                                    key.clone(),
+                                    vec![player_score.try_into().with_context(|| {
+                                        format!("Failed to read score with key {}", key)
+                                    })?],
+                                );
                             }
                         }
                     }
@@ -192,7 +197,7 @@ impl Stats {
                         .and_then(|x| {
                             x.iter()
                                 .find(|x| x.player_name == player)
-                                .map(|x| x.score.to_string())
+                                .map(|x| x.score.unwrap_or(0).to_string())
                         })
                         .unwrap_or(String::from("0")),
                 );
@@ -209,10 +214,8 @@ impl Stats {
 #[derive(Debug, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct Objective {
-    criteria_name: String,
-    display_auto_update: i8,
+    criteria_name: Option<String>,
     display_name: String,
-    render_type: String,
 }
 
 impl Objective {
@@ -235,31 +238,19 @@ impl TryFrom<&Value> for Objective {
         match value {
             Value::Compound(val) => Ok(Self {
                 criteria_name: {
-                    match val
-                        .get("CriteriaName")
-                        .ok_or(Error::MissingNbtField("CriteriaName"))?
-                    {
-                        Value::String(s) => Ok(s.clone()),
-                        data => Err(Error::WrongTypeNbtField {
-                            field: "CriteriaName",
-                            expected_type: "String",
-                            real_data: data.clone(),
-                        }),
-                    }?
-                },
-                display_auto_update: {
-                    match val
-                        .get("display_auto_update")
-                        .ok_or(Error::MissingNbtField("display_auto_update"))?
-                    {
-                        Value::Byte(s) => Ok(*s),
-                        data => Err(Error::WrongTypeNbtField {
-                            field: "display_auto_update",
-                            expected_type: "Byte",
-                            real_data: data.clone(),
-                        }),
-                    }?
-                },
+                    if let Some(t) = val.get("CriteriaName") {
+                        match t {
+                            Value::String(s) => Ok(Some(s.clone())),
+                            data => Err(Error::WrongTypeNbtField {
+                                field: "CriteriaName",
+                                expected_type: "String",
+                                real_data: data.clone(),
+                            }),
+                        }
+                    } else {
+                        Ok(None)
+                    }
+                }?,
                 display_name: {
                     match val
                         .get("DisplayName")
@@ -278,19 +269,6 @@ impl TryFrom<&Value> for Objective {
                         }),
                     }?
                 },
-                render_type: {
-                    match val
-                        .get("RenderType")
-                        .ok_or(Error::MissingNbtField("RenderType"))?
-                    {
-                        Value::String(s) => Ok(s.clone()),
-                        value => Err(Error::WrongTypeNbtField {
-                            field: "RenderTyoe",
-                            expected_type: "String",
-                            real_data: value.clone(),
-                        }),
-                    }?
-                },
             }),
             value => Err(Error::WrongTypeNbtField {
                 field: "objective",
@@ -303,9 +281,8 @@ impl TryFrom<&Value> for Objective {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PlayerScore {
-    locked: i8,
     player_name: String,
-    score: i64,
+    score: Option<i64>,
 }
 
 impl PlayerScore {
@@ -330,16 +307,6 @@ impl TryFrom<&Value> for PlayerScore {
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
         match value {
             Value::Compound(val) => Ok(Self {
-                locked: {
-                    match val.get("Locked").ok_or(Error::MissingNbtField("Locked"))? {
-                        Value::Byte(s) => Ok(*s),
-                        value => Err(Error::WrongTypeNbtField {
-                            field: "Locked",
-                            expected_type: "Byte",
-                            real_data: value.clone(),
-                        }),
-                    }?
-                },
                 player_name: {
                     match val.get("Name").ok_or(Error::MissingNbtField("Name"))? {
                         Value::String(s) => Ok(s.clone()),
@@ -351,17 +318,21 @@ impl TryFrom<&Value> for PlayerScore {
                     }?
                 },
                 score: {
-                    match val.get("Score").ok_or(Error::MissingNbtField("Score"))? {
-                        Value::Long(s) => Ok(*s),
-                        Value::Int(s) => Ok(*s as i64),
-                        Value::Short(s) => Ok(*s as i64),
-                        Value::Byte(s) => Ok(*s as i64),
-                        value => Err(Error::WrongTypeNbtField {
-                            field: "Score",
-                            expected_type: "Long, Int, Short, Byte",
-                            real_data: value.clone(),
-                        }),
-                    }?
+                    if let Some(t) = val.get("Score") {
+                        match t {
+                            Value::Long(s) => Ok(Some(*s)),
+                            Value::Int(s) => Ok(Some(*s as i64)),
+                            Value::Short(s) => Ok(Some(*s as i64)),
+                            Value::Byte(s) => Ok(Some(*s as i64)),
+                            value => Err(Error::WrongTypeNbtField {
+                                field: "Score",
+                                expected_type: "Long, Int, Short, Byte",
+                                real_data: value.clone(),
+                            }),
+                        }?
+                    } else {
+                        None
+                    }
                 },
             }),
             value => Err(Error::WrongTypeNbtField {

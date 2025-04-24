@@ -1,12 +1,13 @@
 use std::{
     fs::{self, File},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
+use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use clap::Parser;
 use futures::executor::block_on;
-use poop_scoreboard::{error::Error, stats::Stats};
+use poop_scoreboard::stats::Stats;
 use sqlx::{Connection, MySqlConnection};
 
 #[derive(Debug, Parser)]
@@ -14,6 +15,8 @@ use sqlx::{Connection, MySqlConnection};
 struct Args {
     #[arg()]
     input_file: PathBuf,
+    #[arg(short, long)]
+    force: bool,
     #[arg(short, long, group = "output")]
     output_file: Option<PathBuf>,
     #[arg(short, long, group = "output")]
@@ -43,10 +46,10 @@ struct CSVOptions{
     output: String
 }
  */
-fn main() -> Result<(), Error> {
+fn main() -> Result<()> {
     let args = Args::parse();
 
-    let input_file = fs::File::open(&args.input_file).unwrap();
+    let input_file = fs::File::open(&args.input_file)?;
 
     if let Some(sql) = args.sql_url {
         write_sql(
@@ -58,20 +61,27 @@ fn main() -> Result<(), Error> {
             },
         )?;
     } else {
-        write_csv(
-            input_file,
-            match args.output_file {
-                Some(path) => fs::File::create_new(path),
-                None => fs::File::create_new(args.input_file.with_extension("csv")),
-            }?,
-        )?;
+        let path = match args.output_file {
+            Some(path) => path,
+            None => args.input_file.with_extension("csv"),
+        };
+
+        write_csv(input_file, &path, args.force)?;
     }
 
     Ok(())
 }
 
-fn write_csv(input_file: File, output_file: File) -> Result<(), Error> {
+fn write_csv(input_file: File, output_file_path: &Path, force: bool) -> Result<()> {
     let stats = Stats::from_gzip_reader(input_file)?;
+
+    let output_file = match force {
+        true => fs::File::create(output_file_path)?,
+        false => fs::File::create_new(output_file_path).with_context(|| {
+            "If you wish to overwrite the existing file, try using the --force flag"
+        })?,
+    };
+
     stats.write_csv(output_file)?;
 
     println!("Converted nbt to csv");
@@ -79,7 +89,7 @@ fn write_csv(input_file: File, output_file: File) -> Result<(), Error> {
     Ok(())
 }
 
-fn write_sql(input_file: File, url: &str, timestamp: DateTime<Utc>) -> Result<(), Error> {
+fn write_sql(input_file: File, url: &str, timestamp: DateTime<Utc>) -> Result<()> {
     let mut conn = block_on(MySqlConnection::connect(url))?;
 
     let stats = Stats::from_gzip_reader(input_file)?;
